@@ -151,6 +151,9 @@ def main(path, github_token=None):
 
         print(f"Concatenation complete. Output saved to '{output_filename}'")
         print(f"Estimated total tokens: {total_tokens}")
+        
+        if total_tokens > 120000:
+            print(f"\nTotal tokens is above current limit for Claude 3.5 Opus, consider filtering your repository")
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
