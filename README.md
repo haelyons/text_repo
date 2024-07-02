@@ -38,8 +38,8 @@ python text_repo.py -t ghp_Rx9fKmLpYjHqNvS3Zw7eBcAd5UoT1iW8nDgE haelyons/challen
 python text_rep.py haelyons/challenger_rp2040_wearable  
 ```
 ## Dependencies
+Run the following, depends on your Python installation. 
 ```
-Run:
 pip3 install requests github pygithub
 
 ``` 

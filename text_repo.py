@@ -72,6 +72,62 @@ def estimate_tokens(text):
     words = re.findall(r'\w+|[^\w\s]', text)
     return len(words)
 
+def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
+    contents = []
+    if is_local:
+        for item in os.listdir(os.path.join(path, github_path)):
+            full_path = os.path.join(path, github_path, item)
+            if os.path.isfile(full_path) and is_text_file(item):
+                try:
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        tokens = estimate_tokens(content)
+                        contents.append(({'path': os.path.join(github_path, item), 'content': content}, tokens))
+                except UnicodeDecodeError:
+                    print(f"Warning: Unable to decode {full_path}")
+            elif os.path.isdir(full_path):
+                contents.append(({'path': os.path.join(github_path, item), 'type': 'dir'}, 0))
+    else:
+        items = repo.get_contents(github_path)
+        for item in items:
+            if item.type == "file" and is_text_file(item.name):
+                try:
+                    content = item.decoded_content.decode("utf-8")
+                    tokens = estimate_tokens(content)
+                    contents.append((item, tokens))
+                except UnicodeDecodeError:
+                    print(f"Warning: Unable to decode {item.path}")
+            elif item.type == "dir":
+                contents.append(({'path': item.path, 'type': 'dir'}, 0))
+    return contents
+
+def concatenate_files_recursively(path, is_local=True, repo=None, max_tokens=None):
+    total_tokens = 0
+    concatenated_content = ""
+    used_files = []
+    to_process = [("", 0)]  # (path, level)
+
+    while to_process:
+        current_path, current_level = to_process.pop(0)
+        contents = get_contents_with_tokens(path, is_local, repo, current_path)
+        
+        # Process files at this level
+        for item, tokens in contents:
+            if isinstance(item, dict) and item['type'] == 'dir':
+                to_process.append((item['path'], current_level + 1))
+            else:
+                if max_tokens and total_tokens + tokens > max_tokens:
+                    return concatenated_content, total_tokens, used_files
+                
+                file_path = item.path if not is_local else item['path']
+                file_content = item.decoded_content.decode("utf-8") if not is_local else item['content']
+                
+                concatenated_content += f"\n'''---\n{file_path}\n'''---\n{file_content}\n"
+                total_tokens += tokens
+                used_files.append(file_path)
+
+    return concatenated_content, total_tokens, used_files
+
 def is_text_file(filename):
     _, ext = os.path.splitext(filename.lower())
     return ext not in BLACKLIST_EXTENSIONS
@@ -110,66 +166,54 @@ def get_repo_tree(repo, path="", prefix=""):
             tree += f"{prefix}├── {content.name}\n"
     return tree
 
-def main(path, github_token=None):
+def main(path, github_token=None, token_limit=15000):
     try:
         is_local = os.path.exists(path)
-        total_tokens = 0
         
-        if is_local:
-            repo_name = os.path.basename(os.path.abspath(path))
-            output_filename = f"{repo_name}_concatenated.txt"
-            with open(output_filename, "w", encoding="utf-8") as outfile:
-                outfile.write("'''---\nRepository Structure:\n\n")
-                tree = get_local_tree(path)
-                outfile.write(tree)
-                total_tokens += estimate_tokens(tree)
-                outfile.write("\n'''---\n")
-
-                for file_path in get_local_contents(path):
-                    rel_path = os.path.relpath(file_path, path)
-                    outfile.write(f"\n'''---\n{rel_path}\n'''---\n")
-                    try:
-                        with open(file_path, "r", encoding="utf-8") as infile:
-                            content = infile.read()
-                            outfile.write(content)
-                            total_tokens += estimate_tokens(content)
-                        outfile.write("\n")
-                    except UnicodeDecodeError:
-                        outfile.write(f"[Unable to decode file: {rel_path}]\n")
-        else:
+        if not is_local:
             github_token = get_github_token(github_token)
             if not github_token:
                 raise ValueError("GitHub token is required for remote repositories. Please provide a token using the -t option.")
-            
             g = Github(github_token)
             repo = g.get_repo(path)
-            output_filename = f"{repo.name}_concatenated.txt"
+        else:
+            repo = None
+
+        print("Estimating repository size...")
+        content, total_tokens, _ = concatenate_files_recursively(path, is_local, repo)
+        
+        print(f"Estimated total tokens in the repository: {total_tokens}")
+        
+        if total_tokens > token_limit:
+            choice = input(f"The repository exceeds {token_limit} tokens. Do you want to:\n"
+                           f"1. Concatenate files until reaching ~{token_limit} tokens\n"
+                           "2. Convert the entire repository\n"
+                           "Enter your choice (1 or 2): ")
             
-            with open(output_filename, "w", encoding="utf-8") as outfile:
-                outfile.write("'''---\nRepository Structure:\n\n")
-                tree = get_repo_tree(repo)
-                outfile.write(tree)
-                total_tokens += estimate_tokens(tree)
-                outfile.write("\n'''---\n")
+            if choice == "1":
+                content, actual_tokens, used_files = concatenate_files_recursively(path, is_local, repo, max_tokens=token_limit)
+                output_filename = f"{'local' if is_local else repo.name}_partial_concatenated.txt"
+                print(f"Files included: {', '.join(used_files)}")
+            elif choice == "2":
+                actual_tokens = total_tokens
+                output_filename = f"{'local' if is_local else repo.name}_full_concatenated.txt"
+            else:
+                print("Invalid choice. Exiting.")
+                return
+        else:
+            actual_tokens = total_tokens
+            output_filename = f"{'local' if is_local else repo.name}_concatenated.txt"
 
-                files = get_repo_contents(repo)
-                for file in files:
-                    if file.type == "file":
-                        outfile.write(f"\n'''---\n{file.path}\n'''---\n")
-                        try:
-                            content = file.decoded_content.decode("utf-8")
-                            outfile.write(content)
-                            total_tokens += estimate_tokens(content)
-                            outfile.write("\n")
-                        except UnicodeDecodeError:
-                            outfile.write(f"[Unable to decode file: {file.path}]\n")
-
-        # Add token estimation to the end of the file
-        with open(output_filename, "a", encoding="utf-8") as outfile:
-            outfile.write(f"\n'''---\nEstimated total tokens: {total_tokens}\n'''---\n")
+        with open(output_filename, "w", encoding="utf-8") as outfile:
+            outfile.write("'''---\nRepository Structure:\n\n")
+            tree = get_local_tree(path) if is_local else get_repo_tree(repo)
+            outfile.write(tree)
+            outfile.write("\n'''---\n")
+            outfile.write(content)
+            outfile.write(f"\n'''---\nEstimated total tokens: {actual_tokens}\n'''---\n")
 
         print(f"Concatenation complete. Output saved to '{output_filename}'")
-        print(f"Estimated total tokens: {total_tokens}")
+        print(f"Estimated total tokens: {actual_tokens}")
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
@@ -179,6 +223,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Concatenate files from a local directory or GitHub repository.")
     parser.add_argument("path", help="Local directory path or GitHub repository full name (e.g., 'owner/repo')")
     parser.add_argument("-t", "--token", help="GitHub Personal Access Token (required for GitHub repositories)")
+    parser.add_argument("-l", "--limit", type=int, default=15000, help="Token limit for partial concatenation (default: 15000)")
     args = parser.parse_args()
 
-    main(args.path, args.token)
+    main(args.path, args.token, args.limit)
