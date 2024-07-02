@@ -12,9 +12,6 @@ Concatenate files from a local directory or GitHub repository and estimate token
 
 Token refers to your Github auth token: navigate to "Settings > Developer settings > Personal access tokens > Tokens (classic)" to generate one and pass it as a command line argument likeso:
 
-python text_repo.py -t eXaMpLeToKeN haelyons/text_repo
-
-
 positional arguments:
   path                  Local directory path or GitHub repository full name (e.g., 'owner/repo')
 
@@ -39,7 +36,6 @@ cd ./text_repo
 python text_repo.py -t ghp_Rx9fKmLpYjHqNvS3Zw7eBcAd5UoT1iW8nDgE haelyons/challenger_rp2040_wearable
 # Future usage won't require your token again
 python text_rep.py haelyons/challenger_rp2040_wearable  
-
 ```
 ## Dependencies
 ```
