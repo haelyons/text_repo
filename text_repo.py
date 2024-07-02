@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 import requests
+import json
 from github import Github
 from io import StringIO
 import re
@@ -23,6 +24,23 @@ BLACKLIST_EXTENSIONS = {
     '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
     '.iso', '.bin', '.dat'
 }
+
+TOKEN_FILE = '.github_token.json'
+
+def get_github_token(provided_token=None):
+    if provided_token:
+        # If a token is provided, save it and return it
+        with open(TOKEN_FILE, 'w') as f:
+            json.dump({"token": provided_token}, f)
+        return provided_token
+    
+    # If no token is provided, try to read from file
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, 'r') as f:
+            data = json.load(f)
+            return data.get("token")
+    
+    return None
 
 def estimate_tokens(text):
     def is_likely_code(text):
@@ -119,8 +137,9 @@ def main(path, github_token=None):
                     except UnicodeDecodeError:
                         outfile.write(f"[Unable to decode file: {rel_path}]\n")
         else:
+            github_token = get_github_token(github_token)
             if not github_token:
-                raise ValueError("GitHub token is required for remote repositories")
+                raise ValueError("GitHub token is required for remote repositories. Please provide a token using the -t option.")
             
             g = Github(github_token)
             repo = g.get_repo(path)
@@ -151,9 +170,6 @@ def main(path, github_token=None):
 
         print(f"Concatenation complete. Output saved to '{output_filename}'")
         print(f"Estimated total tokens: {total_tokens}")
-        
-        if total_tokens > 120000:
-            print(f"\nTotal tokens is above current limit for Claude 3.5 Opus, consider filtering your repository")
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
