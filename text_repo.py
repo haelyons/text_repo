@@ -8,6 +8,7 @@ from io import StringIO
 import re
 import tokenize
 from io import BytesIO
+import traceback
 
 BLACKLIST_EXTENSIONS = {
     # Images
@@ -75,18 +76,28 @@ def estimate_tokens(text):
 def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
     contents = []
     if is_local:
-        for item in os.listdir(os.path.join(path, github_path)):
-            full_path = os.path.join(path, github_path, item)
-            if os.path.isfile(full_path) and is_text_file(item):
+        full_path = os.path.join(path, github_path)
+        for item in os.listdir(full_path):
+            item_path = os.path.join(full_path, item)
+            if os.path.isfile(item_path) and is_text_file(item):
                 try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
+                    with open(item_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                         tokens = estimate_tokens(content)
-                        contents.append(({'path': os.path.join(github_path, item), 'content': content}, tokens))
+                        contents.append({
+                            'path': os.path.join(github_path, item),
+                            'content': content,
+                            'type': 'file',
+                            'tokens': tokens
+                        })
                 except UnicodeDecodeError:
-                    print(f"Warning: Unable to decode {full_path}")
-            elif os.path.isdir(full_path):
-                contents.append(({'path': os.path.join(github_path, item), 'type': 'dir'}, 0))
+                    print(f"Warning: Unable to decode {item_path}")
+            elif os.path.isdir(item_path):
+                contents.append({
+                    'path': os.path.join(github_path, item),
+                    'type': 'dir',
+                    'tokens': 0
+                })
     else:
         items = repo.get_contents(github_path)
         for item in items:
@@ -94,11 +105,20 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
                 try:
                     content = item.decoded_content.decode("utf-8")
                     tokens = estimate_tokens(content)
-                    contents.append((item, tokens))
+                    contents.append({
+                        'path': item.path,
+                        'content': content,
+                        'type': 'file',
+                        'tokens': tokens
+                    })
                 except UnicodeDecodeError:
                     print(f"Warning: Unable to decode {item.path}")
             elif item.type == "dir":
-                contents.append(({'path': item.path, 'type': 'dir'}, 0))
+                contents.append({
+                    'path': item.path,
+                    'type': 'dir',
+                    'tokens': 0
+                })
     return contents
 
 def concatenate_files_recursively(path, is_local=True, repo=None, max_tokens=None):
@@ -111,19 +131,18 @@ def concatenate_files_recursively(path, is_local=True, repo=None, max_tokens=Non
         current_path, current_level = to_process.pop(0)
         contents = get_contents_with_tokens(path, is_local, repo, current_path)
         
-        # Process files at this level
-        for item, tokens in contents:
-            if isinstance(item, dict) and item['type'] == 'dir':
+        for item in contents:
+            if item['type'] == 'dir':
                 to_process.append((item['path'], current_level + 1))
             else:
-                if max_tokens and total_tokens + tokens > max_tokens:
+                if max_tokens and total_tokens + item['tokens'] > max_tokens:
                     return concatenated_content, total_tokens, used_files
                 
-                file_path = item.path if not is_local else item['path']
-                file_content = item.decoded_content.decode("utf-8") if not is_local else item['content']
+                file_path = item['path']
+                file_content = item['content']
                 
                 concatenated_content += f"\n'''---\n{file_path}\n'''---\n{file_content}\n"
-                total_tokens += tokens
+                total_tokens += item['tokens']
                 used_files.append(file_path)
 
     return concatenated_content, total_tokens, used_files
@@ -207,6 +226,7 @@ def main(path, github_token=None, token_limit=15000):
         with open(output_filename, "w", encoding="utf-8") as outfile:
             outfile.write("'''---\nRepository Structure:\n\n")
             tree = get_local_tree(path) if is_local else get_repo_tree(repo)
+            #print("\n", tree, "\n")
             outfile.write(tree)
             outfile.write("\n'''---\n")
             outfile.write(content)
@@ -216,7 +236,10 @@ def main(path, github_token=None, token_limit=15000):
         print(f"Estimated total tokens: {actual_tokens}")
 
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error msg: {str(e)}")
+        print("\n")
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
