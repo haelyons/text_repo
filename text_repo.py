@@ -10,18 +10,37 @@ import tokenize
 from io import BytesIO
 import traceback
 
+BLACKLIST_FILENAMES = {
+    '.gitignore',
+    'COPYING',
+    'LICENSE',
+    'CHANGELOG.md',
+    'CONTRIBUTORS.md',
+    'CONTRIBUTING.md', 
+    'FLAGS.md',
+    'appveyor.yml',
+    'CODEOWNERS',
+    '.travis.yml',
+    '.gitlab-ci.yml',
+    'requirements.txt',
+    'setup.py',
+    'package.json',
+    'package-lock.json',
+    'yarn.lock',
+    '.editorconfig',
+    '.eslintrc',
+    '.prettierrc',
+    '.stylelintrc',
+    'Makefile',
+    'CMakeLists.txt'
+}
+
 BLACKLIST_EXTENSIONS = {
-    # Images
     '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp',
-    # Audio
     '.mp3', '.wav', '.ogg', '.flac', '.aac',
-    # Video
     '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv',
-    # Archives
     '.zip', '.rar', '.7z', '.tar', '.gz',
-    # Executables
     '.exe', '.dll', '.so', '.dylib',
-    # Other binary formats
     '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
     '.iso', '.bin', '.dat'
 }
@@ -79,13 +98,14 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
         full_path = os.path.join(path, github_path)
         for item in os.listdir(full_path):
             item_path = os.path.join(full_path, item)
-            if os.path.isfile(item_path) and is_text_file(item):
+            relative_path = os.path.join(github_path, item)
+            if os.path.isfile(item_path) and should_include_file(relative_path, item):
                 try:
                     with open(item_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                         tokens = estimate_tokens(content)
                         contents.append({
-                            'path': os.path.join(github_path, item),
+                            'path': relative_path,
                             'content': content,
                             'type': 'file',
                             'tokens': tokens
@@ -94,14 +114,14 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
                     print(f"Warning: Unable to decode {item_path}")
             elif os.path.isdir(item_path):
                 contents.append({
-                    'path': os.path.join(github_path, item),
+                    'path': relative_path,
                     'type': 'dir',
                     'tokens': 0
                 })
     else:
         items = repo.get_contents(github_path)
         for item in items:
-            if item.type == "file" and is_text_file(item.name):
+            if item.type == "file" and should_include_file(item.path, item.name):
                 try:
                     content = item.decoded_content.decode("utf-8")
                     tokens = estimate_tokens(content)
@@ -148,6 +168,16 @@ def concatenate_files_recursively(path, is_local=True, repo=None, max_tokens=Non
     return concatenated_content, total_tokens, used_files
 
 def is_text_file(filename):
+    if filename in BLACKLIST_FILENAMES:
+        return False
+    _, ext = os.path.splitext(filename.lower())
+    return ext not in BLACKLIST_EXTENSIONS
+
+def should_include_file(filepath, filename):
+    if filename in BLACKLIST_FILENAMES:
+        return False
+    if any(part.startswith('.') for part in filepath.split(os.sep)):
+        return False  # Exclude hidden directories
     _, ext = os.path.splitext(filename.lower())
     return ext not in BLACKLIST_EXTENSIONS
 
@@ -244,7 +274,7 @@ def main(path, github_token=None, token_limit=15000):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Concatenate files from a local directory or GitHub repository.")
-    parser.add_argument("path", help="Local directory path or GitHub repository full name (e.g., 'owner/repo')")
+    parser.add_argument("path", help="Local directory path or GitHub repository full name (ex. 'owner/repo')")
     parser.add_argument("-t", "--token", help="GitHub Personal Access Token (required for GitHub repositories)")
     parser.add_argument("-l", "--limit", type=int, default=15000, help="Token limit for partial concatenation (default: 15000)")
     args = parser.parse_args()
