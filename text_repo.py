@@ -9,6 +9,7 @@ import re
 import tokenize
 from io import BytesIO
 import traceback
+from docx import Document
 
 BLACKLIST_FILENAMES = {
     '.gitignore',
@@ -41,7 +42,7 @@ BLACKLIST_EXTENSIONS = {
     '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv',
     '.zip', '.rar', '.7z', '.tar', '.gz',
     '.exe', '.dll', '.so', '.dylib',
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    #'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
     '.iso', '.bin', '.dat'
 }
 
@@ -101,17 +102,20 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
             relative_path = os.path.join(github_path, item)
             if os.path.isfile(item_path) and should_include_file(relative_path, item):
                 try:
-                    with open(item_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        tokens = estimate_tokens(content)
-                        contents.append({
-                            'path': relative_path,
-                            'content': content,
-                            'type': 'file',
-                            'tokens': tokens
-                        })
-                except UnicodeDecodeError:
-                    print(f"Warning: Unable to decode {item_path}")
+                    if item.lower().endswith('.docx'):
+                        content = extract_text_from_docx(item_path)
+                    else:
+                        with open(item_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                    tokens = estimate_tokens(content)
+                    contents.append({
+                        'path': relative_path,
+                        'content': content,
+                        'type': 'file',
+                        'tokens': tokens
+                    })
+                except Exception as e:
+                    print(f"Warning: Unable to process {item_path}. Error: {str(e)}")
             elif os.path.isdir(item_path):
                 contents.append({
                     'path': relative_path,
@@ -123,7 +127,11 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
         for item in items:
             if item.type == "file" and should_include_file(item.path, item.name):
                 try:
-                    content = item.decoded_content.decode("utf-8")
+                    if item.name.lower().endswith('.docx'):
+                        # For GitHub repos, we need to download the file first
+                        content = extract_text_from_docx(BytesIO(item.decoded_content))
+                    else:
+                        content = item.decoded_content.decode("utf-8")
                     tokens = estimate_tokens(content)
                     contents.append({
                         'path': item.path,
@@ -131,8 +139,8 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
                         'type': 'file',
                         'tokens': tokens
                     })
-                except UnicodeDecodeError:
-                    print(f"Warning: Unable to decode {item.path}")
+                except Exception as e:
+                    print(f"Warning: Unable to process {item.path}. Error: {str(e)}")
             elif item.type == "dir":
                 contents.append({
                     'path': item.path,
@@ -171,7 +179,7 @@ def is_text_file(filename):
     if filename in BLACKLIST_FILENAMES:
         return False
     _, ext = os.path.splitext(filename.lower())
-    return ext not in BLACKLIST_EXTENSIONS
+    return ext not in BLACKLIST_EXTENSIONS or ext == ".docx"
 
 def should_include_file(filepath, filename):
     if filename in BLACKLIST_FILENAMES:
@@ -180,6 +188,16 @@ def should_include_file(filepath, filename):
         return False  # Exclude hidden directories
     _, ext = os.path.splitext(filename.lower())
     return ext not in BLACKLIST_EXTENSIONS
+
+def extract_text_from_docx(file_or_bytes):
+    if isinstance(file_or_bytes, str):
+        doc = Document(file_or_bytes)
+    else:
+        doc = Document(file_or_bytes)
+    full_text = []
+    for para in doc.paragraphs:
+        full_text.append(para.text)
+    return '\n'.join(full_text)
 
 def get_local_contents(path):
     for root, dirs, files in os.walk(path):
@@ -247,7 +265,7 @@ def main(path, github_token=None, token_limit=15000):
                 actual_tokens = total_tokens
                 output_filename = f"{'local' if is_local else repo.name}_full_concatenated.txt"
             else:
-                print("Invalid choice. Exiting.")
+                print("Invalid choice, exiting.")
                 return
         else:
             actual_tokens = total_tokens

@@ -44,5 +44,6 @@ python text_rep.py haelyons/challenger_rp2040_wearable
 ## Dependencies
 Run the following, depends on your Python installation. 
 ```
-pip3 install requests github pygithub
+pip install python-docx 
+pip install requests github pygithub
 ``` 
