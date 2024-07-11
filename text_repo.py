@@ -38,12 +38,13 @@ BLACKLIST_FILENAMES = {
 
 BLACKLIST_EXTENSIONS = {
     '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp',
+    '.ico', '.ttf', 'woff2', 'eot', 'woff',
     '.mp3', '.wav', '.ogg', '.flac', '.aac',
     '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv',
     '.zip', '.rar', '.7z', '.tar', '.gz',
     '.exe', '.dll', '.so', '.dylib',
     #'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-    '.iso', '.bin', '.dat'
+    '.iso', '.bin', '.dat', '.img'
 }
 
 TOKEN_FILE = '.github_token.json'
@@ -260,7 +261,7 @@ def main(path, github_token=None, token_limit=15000):
             if choice == "1":
                 content, actual_tokens, used_files = concatenate_files_recursively(path, is_local, repo, max_tokens=token_limit)
                 output_filename = f"{'local' if is_local else repo.name}_partial_concatenated.txt"
-                print(f"Files included: {', '.join(used_files)}")
+                print(f"\nFiles included: {', '.join(used_files)}")
             elif choice == "2":
                 actual_tokens = total_tokens
                 output_filename = f"{'local' if is_local else repo.name}_full_concatenated.txt"
@@ -280,7 +281,7 @@ def main(path, github_token=None, token_limit=15000):
             outfile.write(content)
             outfile.write(f"\n'''---\nEstimated total tokens: {actual_tokens}\n'''---\n")
 
-        print(f"Concatenation complete. Output saved to '{output_filename}'")
+        print(f"\nConcatenation complete. Output saved to '{output_filename}'")
         print(f"Estimated total tokens: {actual_tokens}")
 
     except Exception as e:
