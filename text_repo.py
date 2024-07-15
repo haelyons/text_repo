@@ -256,7 +256,8 @@ def main(path, github_token=None, token_limit=15000):
             choice = input(f"The repository exceeds {token_limit} tokens. Do you want to:\n"
                            f"1. Concatenate files until reaching ~{token_limit} tokens\n"
                            "2. Convert the entire repository\n"
-                           "Enter your choice (1 or 2): ")
+                           "3. Exit\n"
+                           "Enter your choice (1 - 3): ")
             
             if choice == "1":
                 content, actual_tokens, used_files = concatenate_files_recursively(path, is_local, repo, max_tokens=token_limit)
@@ -265,6 +266,9 @@ def main(path, github_token=None, token_limit=15000):
             elif choice == "2":
                 actual_tokens = total_tokens
                 output_filename = f"{'local' if is_local else repo.name}_full_concatenated.txt"
+            elif choice == "3":
+                print("Exiting...")
+                return
             else:
                 print("Invalid choice, exiting.")
                 return
