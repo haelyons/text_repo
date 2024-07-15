@@ -97,39 +97,58 @@ def estimate_tokens(text):
 def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
     contents = []
     if is_local:
-        full_path = os.path.join(path, github_path)
-        for item in os.listdir(full_path):
-            item_path = os.path.join(full_path, item)
-            relative_path = os.path.join(github_path, item)
-            if os.path.isfile(item_path) and should_include_file(relative_path, item):
-                try:
-                    if item.lower().endswith('.docx'):
-                        content = extract_text_from_docx(item_path)
-                    else:
-                        with open(item_path, 'r', encoding='utf-8') as f:
-                            content = f.read()
-                    tokens = estimate_tokens(content)
+        if os.path.isfile(path):
+            # Handle individual file
+            try:
+                if path.lower().endswith('.docx'):
+                    content = extract_text_from_docx(path)
+                else:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                tokens = estimate_tokens(content)
+                contents.append({
+                    'path': os.path.basename(path),
+                    'content': content,
+                    'type': 'file',
+                    'tokens': tokens
+                })
+            except Exception as e:
+                print(f"Warning: Unable to process {path}. Error: {str(e)}")
+        else:
+            # Handle directory (existing code)
+            full_path = os.path.join(path, github_path)
+            for item in os.listdir(full_path):
+                item_path = os.path.join(full_path, item)
+                relative_path = os.path.join(github_path, item)
+                if os.path.isfile(item_path) and should_include_file(relative_path, item):
+                    try:
+                        if item.lower().endswith('.docx'):
+                            content = extract_text_from_docx(item_path)
+                        else:
+                            with open(item_path, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                        tokens = estimate_tokens(content)
+                        contents.append({
+                            'path': relative_path,
+                            'content': content,
+                            'type': 'file',
+                            'tokens': tokens
+                        })
+                    except Exception as e:
+                        print(f"Warning: Unable to process {item_path}. Error: {str(e)}")
+                elif os.path.isdir(item_path):
                     contents.append({
                         'path': relative_path,
-                        'content': content,
-                        'type': 'file',
-                        'tokens': tokens
+                        'type': 'dir',
+                        'tokens': 0
                     })
-                except Exception as e:
-                    print(f"Warning: Unable to process {item_path}. Error: {str(e)}")
-            elif os.path.isdir(item_path):
-                contents.append({
-                    'path': relative_path,
-                    'type': 'dir',
-                    'tokens': 0
-                })
     else:
+        # Handle GitHub repository
         items = repo.get_contents(github_path)
         for item in items:
             if item.type == "file" and should_include_file(item.path, item.name):
                 try:
                     if item.name.lower().endswith('.docx'):
-                        # For GitHub repos, we need to download the file first
                         content = extract_text_from_docx(BytesIO(item.decoded_content))
                     else:
                         content = item.decoded_content.decode("utf-8")
@@ -154,25 +173,38 @@ def concatenate_files_recursively(path, is_local=True, repo=None, max_tokens=Non
     total_tokens = 0
     concatenated_content = ""
     used_files = []
-    to_process = [("", 0)]  # (path, level)
 
-    while to_process:
-        current_path, current_level = to_process.pop(0)
-        contents = get_contents_with_tokens(path, is_local, repo, current_path)
-        
+    if is_local and os.path.isfile(path):
+        # Handle individual file
+        contents = get_contents_with_tokens(path, is_local, repo)
         for item in contents:
-            if item['type'] == 'dir':
-                to_process.append((item['path'], current_level + 1))
-            else:
-                if max_tokens and total_tokens + item['tokens'] > max_tokens:
-                    return concatenated_content, total_tokens, used_files
-                
-                file_path = item['path']
-                file_content = item['content']
-                
-                concatenated_content += f"\n'''---\n{file_path}\n'''---\n{file_content}\n"
-                total_tokens += item['tokens']
-                used_files.append(file_path)
+            if max_tokens and total_tokens + item['tokens'] > max_tokens:
+                break
+            file_path = item['path']
+            file_content = item['content']
+            concatenated_content += f"\n'''---\n{file_path}\n'''---\n{file_content}\n"
+            total_tokens += item['tokens']
+            used_files.append(file_path)
+    else:
+        # Handle directory or GitHub repository
+        to_process = [("", 0)]  # (path, level)
+        while to_process:
+            current_path, current_level = to_process.pop(0)
+            contents = get_contents_with_tokens(path, is_local, repo, current_path)
+            
+            for item in contents:
+                if item['type'] == 'dir':
+                    to_process.append((item['path'], current_level + 1))
+                else:
+                    if max_tokens and total_tokens + item['tokens'] > max_tokens:
+                        return concatenated_content, total_tokens, used_files
+                    
+                    file_path = item['path']
+                    file_content = item['content']
+                    
+                    concatenated_content += f"\n'''---\n{file_path}\n'''---\n{file_content}\n"
+                    total_tokens += item['tokens']
+                    used_files.append(file_path)
 
     return concatenated_content, total_tokens, used_files
 
@@ -247,15 +279,15 @@ def main(path, github_token=None, token_limit=15000):
         else:
             repo = None
 
-        print("Estimating repository size...")
+        print("Estimating file/repository size...")
         content, total_tokens, _ = concatenate_files_recursively(path, is_local, repo)
         
-        print(f"Estimated total tokens in the repository: {total_tokens}")
+        print(f"Estimated total tokens: {total_tokens}")
         
         if total_tokens > token_limit:
-            choice = input(f"The repository exceeds {token_limit} tokens. Do you want to:\n"
+            choice = input(f"The content exceeds {token_limit} tokens. Do you want to:\n"
                            f"1. Concatenate files until reaching ~{token_limit} tokens\n"
-                           "2. Convert the entire repository\n"
+                           "2. Convert the entire content\n"
                            "3. Exit\n"
                            "Enter your choice (1 - 3): ")
             
@@ -277,11 +309,13 @@ def main(path, github_token=None, token_limit=15000):
             output_filename = f"{'local' if is_local else repo.name}_concatenated.txt"
 
         with open(output_filename, "w", encoding="utf-8") as outfile:
-            outfile.write("'''---\nRepository Structure:\n\n")
-            tree = get_local_tree(path) if is_local else get_repo_tree(repo)
-            #print("\n", tree, "\n")
-            outfile.write(tree)
-            outfile.write("\n'''---\n")
+            if is_local and os.path.isfile(path):
+                outfile.write(f"'''---\nFile: {os.path.basename(path)}\n'''---\n")
+            else:
+                outfile.write("'''---\nRepository Structure:\n\n")
+                tree = get_local_tree(path) if is_local else get_repo_tree(repo)
+                outfile.write(tree)
+                outfile.write("\n'''---\n")
             outfile.write(content)
             outfile.write(f"\n'''---\nEstimated total tokens: {actual_tokens}\n'''---\n")
 
