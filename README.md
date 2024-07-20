@@ -46,4 +46,7 @@ Run the following, depends on your Python installation.
 ```
 pip install python-docx 
 pip install requests github pygithub
-``` 
+```
+
+## Todo
+- Exclude .git from tree 
