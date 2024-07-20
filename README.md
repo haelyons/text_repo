@@ -49,4 +49,5 @@ pip install requests github pygithub
 ```
 
 ## Todo
-- Exclude .git from tree 
+- Exclude .git from tree
+- Exclude local program outputs from scrape (add destination param) 
