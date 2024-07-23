@@ -41,13 +41,13 @@ python text_repo.py -t ghp_Rx9fKmLpYjHqNvS3Zw7eBcAd5UoT1iW8nDgE haelyons/challen
 # Future usage won't require your token again
 python text_rep.py haelyons/challenger_rp2040_wearable  
 ```
-## Dependencies
+### Dependencies
 Run the following, depends on your Python installation. 
 ```
 pip install python-docx 
 pip install requests github pygithub
 ```
 
-## Todo
+### Todo
 - Exclude .git from tree
 - Exclude local program outputs from scrape (add destination param) 
