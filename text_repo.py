@@ -94,7 +94,7 @@ def estimate_tokens(text):
     words = re.findall(r'\w+|[^\w\s]', text)
     return len(words)
 
-def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
+def get_contents_with_tokens(path, is_local=True, repo=None, github_path="", excluded_files=[]):
     contents = []
     if is_local:
         if os.path.isfile(path):
@@ -115,12 +115,12 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
             except Exception as e:
                 print(f"Warning: Unable to process {path}. Error: {str(e)}")
         else:
-            # Handle directory (existing code)
+            # Handle directory
             full_path = os.path.join(path, github_path)
             for item in os.listdir(full_path):
                 item_path = os.path.join(full_path, item)
                 relative_path = os.path.join(github_path, item)
-                if os.path.isfile(item_path) and should_include_file(relative_path, item):
+                if os.path.isfile(item_path) and should_include_file(relative_path, item, excluded_files):
                     try:
                         if item.lower().endswith('.docx'):
                             content = extract_text_from_docx(item_path)
@@ -146,7 +146,7 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
         # Handle GitHub repository
         items = repo.get_contents(github_path)
         for item in items:
-            if item.type == "file" and should_include_file(item.path, item.name):
+            if item.type == "file" and should_include_file(item.path, item.name, excluded_files):
                 try:
                     if item.name.lower().endswith('.docx'):
                         content = extract_text_from_docx(BytesIO(item.decoded_content))
@@ -169,14 +169,14 @@ def get_contents_with_tokens(path, is_local=True, repo=None, github_path=""):
                 })
     return contents
 
-def concatenate_files_recursively(path, is_local=True, repo=None, max_tokens=None):
+def concatenate_files_recursively(path, is_local=True, repo=None, max_tokens=None, excluded_files=[]):
     total_tokens = 0
     concatenated_content = ""
     used_files = []
 
     if is_local and os.path.isfile(path):
         # Handle individual file
-        contents = get_contents_with_tokens(path, is_local, repo)
+        contents = get_contents_with_tokens(path, is_local, repo, excluded_files=excluded_files)
         for item in contents:
             if max_tokens and total_tokens + item['tokens'] > max_tokens:
                 break
@@ -190,18 +190,18 @@ def concatenate_files_recursively(path, is_local=True, repo=None, max_tokens=Non
         to_process = [("", 0)]  # (path, level)
         while to_process:
             current_path, current_level = to_process.pop(0)
-            contents = get_contents_with_tokens(path, is_local, repo, current_path)
-            
+            contents = get_contents_with_tokens(path, is_local, repo, current_path, excluded_files)
+
             for item in contents:
                 if item['type'] == 'dir':
                     to_process.append((item['path'], current_level + 1))
                 else:
                     if max_tokens and total_tokens + item['tokens'] > max_tokens:
                         return concatenated_content, total_tokens, used_files
-                    
+
                     file_path = item['path']
                     file_content = item['content']
-                    
+
                     concatenated_content += f"\n'''---\n{file_path}\n'''---\n{file_content}\n"
                     total_tokens += item['tokens']
                     used_files.append(file_path)
@@ -214,11 +214,13 @@ def is_text_file(filename):
     _, ext = os.path.splitext(filename.lower())
     return ext not in BLACKLIST_EXTENSIONS or ext == ".docx"
 
-def should_include_file(filepath, filename):
-    if filename in BLACKLIST_FILENAMES:
+def should_include_file(filepath, filename, excluded_files):
+    if filename in BLACKLIST_FILENAMES or filename in excluded_files:
         return False
     if any(part.startswith('.') for part in filepath.split(os.sep)):
         return False  # Exclude hidden directories
+    if filename.startswith('r2t_'):
+        return False  # Exclude files with r2t_ prefix
     _, ext = os.path.splitext(filename.lower())
     return ext not in BLACKLIST_EXTENSIONS
 
@@ -266,10 +268,10 @@ def get_repo_tree(repo, path="", prefix=""):
             tree += f"{prefix}├── {content.name}\n"
     return tree
 
-def main(path, github_token=None, token_limit=15000):
+def main(path, github_token=None, token_limit=15000, excluded_files=[]):
     try:
         is_local = os.path.exists(path)
-        
+
         if not is_local:
             github_token = get_github_token(github_token)
             if not github_token:
@@ -280,24 +282,24 @@ def main(path, github_token=None, token_limit=15000):
             repo = None
 
         print("Estimating file/repository size...")
-        content, total_tokens, _ = concatenate_files_recursively(path, is_local, repo)
-        
+        content, total_tokens, _ = concatenate_files_recursively(path, is_local, repo, excluded_files=excluded_files)
+
         print(f"Estimated total tokens: {total_tokens}")
-        
+
         if total_tokens > token_limit:
             choice = input(f"The content exceeds {token_limit} tokens. Do you want to:\n"
                            f"1. Concatenate files until reaching ~{token_limit} tokens\n"
                            "2. Convert the entire content\n"
                            "3. Exit\n"
                            "Enter your choice (1 - 3): ")
-            
+
             if choice == "1":
-                content, actual_tokens, used_files = concatenate_files_recursively(path, is_local, repo, max_tokens=token_limit)
-                output_filename = f"{'local' if is_local else repo.name}_partial_concatenated.txt"
+                content, actual_tokens, used_files = concatenate_files_recursively(path, is_local, repo, max_tokens=token_limit, excluded_files=excluded_files)
+                output_filename = f"r2t_{'local' if is_local else repo.name}_partial_concatenated.txt"
                 print(f"\nFiles included: {', '.join(used_files)}")
             elif choice == "2":
                 actual_tokens = total_tokens
-                output_filename = f"{'local' if is_local else repo.name}_full_concatenated.txt"
+                output_filename = f"r2t_{'local' if is_local else repo.name}_full_concatenated.txt"
             elif choice == "3":
                 print("Exiting...")
                 return
@@ -306,7 +308,7 @@ def main(path, github_token=None, token_limit=15000):
                 return
         else:
             actual_tokens = total_tokens
-            output_filename = f"{'local' if is_local else repo.name}_concatenated.txt"
+            output_filename = f"r2t_{'local' if is_local else repo.name}_concatenated.txt"
 
         with open(output_filename, "w", encoding="utf-8") as outfile:
             if is_local and os.path.isfile(path):
@@ -334,6 +336,8 @@ if __name__ == "__main__":
     parser.add_argument("path", help="Local directory path or GitHub repository full name (ex. 'owner/repo')")
     parser.add_argument("-t", "--token", help="GitHub Personal Access Token (required for GitHub repositories)")
     parser.add_argument("-l", "--limit", type=int, default=15000, help="Token limit for partial concatenation (default: 15000)")
+    parser.add_argument("-f", "--exclude", nargs='+', default=[], help="Files to exclude from processing")
+    
     args = parser.parse_args()
 
     main(args.path, args.token, args.limit)
